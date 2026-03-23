@@ -8,25 +8,35 @@
 
 ---
 
-## 🔥 Key Features (V2.0.0 Optimized)
+## 🔥 Key Features (V2.0.0 Optimized & Enhanced)
 
-### 1. ⚡ Zero I/O Lag Architecture (New!)
-*   **🧠 RAM-Disk IPC**: All Inter-Process Communication (IPC) and monitoring status files are now stored in **RAM (`/dev/shm`)**.
-*   **🚀 Zero Disk Overhead**: Monitoring the transfer uses 0% of your Hardisk/SSD bandwidth, ensuring 100% of your storage performance is dedicated solely to the data transfer.
+### 1. ⚡ Zero I/O Lag Architecture
+*   **🧠 RAM-Disk IPC**: Semua Inter-Process Communication (IPC), file status monitoring, dan cache UI browser kini disimpan di **RAM (`/dev/shm`)**.
+*   **🚀 Zero Disk Overhead**: Monitoring transfer dan navigasi UI menggunakan 0% bandwidth Hardisk/SSD Anda, memastikan 100% kinerja penyimpanan didedikasikan untuk transfer data.
 
 ### 2. 📊 Ultra-Responsive Monitoring (ZMTURBO_V2)
-*   **⏱️ 1-Second Real-time Refresh**: Progress bars and speeds now update every single second (mulus) instead of the old 5-second interval.
-*   **📡 Dual-Format Bandwidth**: Displays network speed in both **MB/s (File size)** and **Mbps/Gbps (Network Bandwidth)** to easily match your ISP/Switch specs.
-*   **🟢 Smooth Progress Bar**: High-precision interpolation ensures the progress bar moves smoothly across the screen.
+*   **⏱️ 1-Second Real-time Refresh**: Progress bar dan kecepatan diperbarui setiap detik (mulus).
+*   **📡 Dual-Format Bandwidth**: Menampilkan kecepatan jaringan dalam **MB/s (Ukuran File)** dan **Mbps/Gbps (Bandwidth Jaringan)**.
+*   **🟢 Smooth Progress Bar**: Interpolasi presisi tinggi memastikan progress bar bergerak mulus.
+*   **✨ Progress Bar Ultra-Andal**: Kini secara adaptif menggunakan output JSON dari `rsync` (jika didukung oleh `rsync` v3.1.0+ Anda) untuk keandalan dan akurasi yang lebih tinggi, tidak mudah rusak oleh perubahan format teks `rsync`.
 
 ### 3. 📜 Enterprise Reconciliation & History
-*   **🕵️ Detailed Audit Logs**: Reports now include **Started Time, Finished Time, Source Path, and Destination Path** for full traceability.
-*   **📏 Human-Readable Reports**: All file sizes in history are automatically converted (e.g., `1.2TB` instead of `1200000000`).
-*   **📂 Permanent Archive**: While monitoring data is in RAM, your **transfer history is permanently saved** on disk in `~/.zturbo_v2/reports`.
+*   **🕵️ Detailed Audit Logs**: Laporan mencakup Waktu Mulai, Waktu Selesai, Jalur Sumber, dan Jalur Tujuan untuk ketertelusuran penuh.
+*   **📏 Human-Readable Reports**: Semua ukuran file dalam riwayat dikonversi otomatis (misal, `1.2TB` daripada `1200000000`).
+*   **📂 Permanent Archive**: Meskipun data monitoring berada di RAM, riwayat transfer Anda disimpan permanen di disk (`~/.zturbo_v2/reports`).
+*   **⚡ Verifikasi Pasca-Transfer Cepat**: Proses verifikasi file setelah transfer selesai jauh lebih cepat dengan memfokuskan pengecekan hanya pada item yang ditransfer, mengurangi beban I/O.
 
 ### 4. 🚀 Hybrid Parallel Engine
-*   **🏎️ TURBO Mode**: Leverages `fpsync` and multi-threaded `rsync` to saturate 10G/40G/100G network pipes.
-*   **🛡️ SAFE Mode**: Prioritizes system stability with `nice` and `ionice` background priorities.
+*   **🏎️ TURBO Mode**: Memanfaatkan `fpsync` dan multi-threaded `rsync` untuk menjenuhkan pipa jaringan 10G/40G/100G.
+*   **🛡️ SAFE Mode**: Memprioritaskan stabilitas sistem dengan prioritas latar belakang `nice` dan `ionice`.
+*   **🔒 Keamanan & Keandalan Ditingkatkan**: Penggunaan `eval` yang berpotensi tidak aman telah dihilangkan, diganti dengan metode eksekusi perintah yang lebih modern dan tangguh, meningkatkan keamanan kode.
+
+### 5. 🖥️ UI Direktori Sangat Responsif (ZTURBO)
+*   **💨 Navigasi Instan**: Penjelajahan direktori di `zturbo` tidak akan lagi "macet" atau lambat, bahkan di direktori besar, berkat sistem kalkulasi ukuran file di latar belakang yang cerdas, efisien, dan "sopan".
+*   **🧠 Cache RAM-Disk**: Ukuran file dan folder dihitung secara asinkron dan di-cache di RAM-disk untuk pembaruan UI yang sangat cepat.
+
+### 6. ⚙️ Manajemen Dependensi Cerdas
+*   **💡 Umpan Balik Proaktif**: `zturbo` sekarang memberikan peringatan yang membantu jika versi `rsync` Anda tidak mendukung fitur optimal (seperti output JSON), memungkinkan Anda mengambil tindakan untuk pengalaman terbaik.
 
 ---
 

@@ -37,6 +37,18 @@ check_deps() {
         echo -e "Please install them first (e.g., sudo apt install fpart rsync)"
         exit 1
     fi
+
+    # Deteksi fitur rsync --json untuk progress bar yang lebih andal
+    if rsync --json --version >/dev/null 2>&1; then
+        export ZTURBO_RSYNC_JSON_SUPPORT=true
+    else
+        export ZTURBO_RSYNC_JSON_SUPPORT=false
+        echo -e "${BOLD_YELLOW}WARNING: Your rsync version does not support JSON output (v3.1.0+ required).${NC}"
+        echo -e "${BOLD_YELLOW}         The progress bar will still function, but may be less accurate or reliable.${NC}"
+        echo -e "${BOLD_YELLOW}         To enable full features, please update rsync to v3.1.0+ or newer.${NC}"
+        echo -e "${BOLD_YELLOW}         e.g., for Debian/Ubuntu: 'sudo apt update && sudo apt install rsync'${NC}"
+        sleep 6
+    fi
 }
 
 # Membersihkan file sementara dan proses saat keluar
@@ -48,8 +60,11 @@ cleanup() {
 
     # echo ">> [DEBUG] cleanup called. Removing ${JOB_DIR}" # Optional debug
     rm -rf "${JOB_DIR}" 2>/dev/null # Hapus seluruh direktori pekerjaan
+    rm -rf "${BROWSER_DIR}" 2>/dev/null # Hapus direktori cache browser
     rm -f /tmp/dt_src_$$ /tmp/dt_dest_$$ /tmp/zturbo_size_$$ 2>/dev/null
     
+    # Bunuh proses-proses latar belakang
+    if [[ -n "${CURRENT_SIZE_CALC_PID}" ]]; then kill "${CURRENT_SIZE_CALC_PID}" 2>/dev/null; fi
     if [[ -n "${GOV_PID}" ]]; then kill "${GOV_PID}" 2>/dev/null; fi
     if [[ ${#BG_PIDS[@]} -gt 0 ]]; then kill "${BG_PIDS[@]}" 2>/dev/null; fi
     pkill -P $$ 2>/dev/null
@@ -142,4 +157,33 @@ write_job_info() {
     done
     # Format: JOB_ID|USER|MODE|DESTINATION|SOURCES_LIST|TOTAL_SIZE
     echo "${JOB_ID}|${REAL_USER}|${CURRENT_MODE}|${DEST}|${source_list%?}|$(cat "${JOB_DIR}/total_size")" > "${JOB_INFO_FILE}"
+}
+
+# Menghitung ukuran file/folder di latar belakang dengan prioritas rendah
+calculate_sizes_background() {
+    local target_dir="$1"
+    local cache_file="$2"
+    
+    # Dapatkan daftar item, abaikan direktori itu sendiri ('.')
+    # Menggunakan find lebih aman daripada ls untuk parsing
+    local items
+    mapfile -t items < <(find "$target_dir" -maxdepth 1 -mindepth 1)
+    
+    for item in "${items[@]}"; do
+        # Periksa apakah proses induk (UI) masih berjalan. Jika tidak, hentikan.
+        if ! kill -0 "$PPID" 2>/dev/null; then
+            exit 0
+        fi
+
+        # Hitung ukuran dengan prioritas paling rendah
+        local item_size
+        item_size=$(nice -n 19 ionice -c 3 du -sh "$item" 2>/dev/null | awk '{print $1}')
+        
+        # Jika ukuran berhasil didapat, tulis ke cache.
+        # Format: fullpath:size
+        # Cukup tambahkan ke file. Proses pembaca di UI akan menanganinya.
+        if [[ -n "$item_size" ]]; then
+            echo "${item}:${item_size}" >> "$cache_file"
+        fi
+    done
 }

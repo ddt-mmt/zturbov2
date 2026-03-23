@@ -25,6 +25,20 @@ show_footer() {
 
 # Modul untuk memilih sumber
 select_source() {
+    # Inisialisasi sumber daya browser
+    mkdir -p "$BROWSER_DIR"
+    local PREV_NAV_PATH=""
+    local -A SIZE_CACHE
+
+    # Fungsi pembersihan khusus untuk browser. Dipanggil saat fungsi `select_source` selesai.
+    cleanup_browser() {
+        if [[ -n "$CURRENT_SIZE_CALC_PID" ]]; then
+            kill "$CURRENT_SIZE_CALC_PID" 2>/dev/null
+            CURRENT_SIZE_CALC_PID=""
+        fi
+    }
+    trap 'cleanup_browser; trap - RETURN' RETURN
+
     while true; do
         print_header
         echo -e "${BOLD_YELLOW}[ STEP 1 ] SELECT SOURCE LOCATION${NC}"
@@ -57,6 +71,31 @@ select_source() {
         BREAK_SRC=false; PAGE=1; PER_PAGE=15
         
         while true; do
+            # --- Logika Kalkulasi Ukuran Asinkron ---
+            if [[ "$NAV_PATH" != "$PREV_NAV_PATH" ]]; then
+                cleanup_browser # Bunuh proses lama jika ada
+                PREV_NAV_PATH="$NAV_PATH"
+                
+                # Gunakan hash dari path sebagai nama file cache yang aman
+                CACHE_FILE="$BROWSER_DIR/$(echo "$NAV_PATH" | md5sum | awk '{print $1}').cache"
+                # Hapus cache lama jika ada dan buat yang baru
+                rm -f "$CACHE_FILE" && touch "$CACHE_FILE"
+
+                # Jalankan kalkulasi di latar belakang
+                calculate_sizes_background "$NAV_PATH" "$CACHE_FILE" &
+                CURRENT_SIZE_CALC_PID=$!
+                
+                # Reset cache di memori
+                declare -A SIZE_CACHE
+            fi
+            
+            # Baca pembaruan dari file cache ke dalam cache memori (associative array)
+            # Ini sangat cepat karena file ada di RAM-disk
+            while IFS=: read -r path size; do
+                SIZE_CACHE["$path"]="$size"
+            done < "$CACHE_FILE"
+
+            # --- Tampilan UI ---
             print_header
             echo -e "${BOLD_YELLOW}[ BROWSE SOURCE ]${NC} ${BOLD_WHITE}$NAV_PATH${NC}"
             
@@ -84,9 +123,6 @@ select_source() {
                  echo -e " [0] ✅ DONE / SELECT CURRENT FOLDER"
             fi
 
-            display_count=1
-            curr_idx=$start_idx
-            
             for (( i=0; i<PER_PAGE; i++ )); do
                 idx=$(( start_idx + i ))
                 if [[ $idx -ge $total_items ]]; then break; fi
@@ -100,27 +136,25 @@ select_source() {
                     MARK="[ ]"
                 fi
                 
-                item_size=$(timeout 0.1 du -sh "$fp" 2>/dev/null | awk '{print $1}')
-                [ -z "$item_size" ] && item_size="?"
+                # Ambil ukuran dari cache, jika tidak ada, gunakan '?'
+                item_size=${SIZE_CACHE["$fp"]:-?}
 
                 rel_num=$(( i + 1 ))
                 
                 if [[ -d "$fp" ]]; then
-                    printf " %s [%2d] 📁 ${BOLD_CYAN}%-30s${NC} ${BOLD_YELLOW}(%s)${NC}
-" "$MARK" "$rel_num" "$item/" "$item_size"
+                    printf " %s [%2d] 📁 ${BOLD_CYAN}%-30s${NC} ${BOLD_YELLOW}(%s)${NC}\n" "$MARK" "$rel_num" "$item/" "$item_size"
                 else
-                    printf " %s [%2d] 📄 %-30s ${GREY}(%s)${NC}
-" "$MARK" "$rel_num" "$item" "$item_size"
+                    printf " %s [%2d] 📄 %-30s ${GREY}(%s)${NC}\n" "$MARK" "$rel_num" "$item" "$item_size"
                 fi
-                display_count=$((display_count+1))
             done
             
+            # --- Penanganan Input ---
             NAV_MENU=""
             if [[ $PAGE -lt $total_pages ]]; then NAV_MENU+="[N] Next | "; fi
             if [[ $PAGE -gt 1 ]]; then NAV_MENU+="[P] Prev | "; fi
             if [[ "$NAV_PATH" == "$MOUNT_ROOT" ]] || [[ "$NAV_PATH" == "/" ]]; then BACK_MSG="Main Menu"; else BACK_MSG="Up (..)"; fi
             
-            show_footer "${NAV_MENU}[#] Enter/Toggle | [S #] Select Folder | [A] All | [C] Clear | [D] Done | [B] $BACK_MSG"
+            show_footer "${NAV_MENU}[#] Enter/Toggle | [S #] Sel | [A] All | [C] Clear | [D] Done | [B] $BACK_MSG"
             read -e inp || exit 1
             
             INP_UP="${inp^^}"
@@ -146,7 +180,6 @@ select_source() {
             fi
             
             if [[ "$INP_UP" == "A" ]]; then
-                 echo "Selecting all items..."
                  for item in "${contents[@]}"; do
                     full_p="${NAV_PATH%/}/$item"
                     SELECTED_MAP["$full_p"]=1
@@ -205,6 +238,8 @@ select_source() {
             for key in "${!SELECTED_MAP[@]}"; do
                 SELECTED_PATHS+=("$key")
             done
+            # Pastikan pembersihan terakhir terjadi sebelum kembali
+            cleanup_browser
             return 0
         fi
     done

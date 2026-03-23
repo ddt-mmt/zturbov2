@@ -20,28 +20,29 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# THE SOFTWARE.
 #
+
+# --- SETUP ---
+# Detect if we're in the source repo or installed.
+if [[ -f "lib/config.sh" ]]; then
+    source "lib/config.sh"
+    source "lib/utils.sh"
+else
+    source "/usr/lib/zturbo_v2/config.sh"
+    source "/usr/lib/zturbo_v2/utils.sh"
+fi
 
 if [ -n "$SUDO_USER" ]; then REAL_USER="$SUDO_USER"; else REAL_USER="$USER"; fi
 
-# FIX: Use standard HOME to match zturbo output location
-# DASHBOARD_DIR moved to RAM for real-time speed
-DASHBOARD_DIR="/dev/shm/zturbo_v2_dashboard"
-REPORT_DIR="$HOME/.zturbo_v2/reports"
 mkdir -p "$DASHBOARD_DIR" "$REPORT_DIR"
 
 # CONFIG: REFRESH RATE (Detik)
 REFRESH_RATE=1
 
+# Ganti variabel warna lama dengan yang dari config.sh
+G=$BOLD_GREEN; Y=$BOLD_YELLOW; R=$BOLD_RED; C=$BOLD_CYAN; W=$BOLD_WHITE;
 
-G='\033[1;32m'; Y='\033[1;33m'; R='\033[1;31m'; C='\033[1;36m'; W='\033[1;37m'; NC='\033[0m'; GREY='\033[0;90m'
 K='\033[K' # Clear to end of line
 trap 'echo -e "\n${R}Exiting Monitor...${NC}"; printf "\033[?25h"; exit 0' SIGINT
 
@@ -56,14 +57,6 @@ draw_bar() {
     if [[ $f -gt $w ]]; then f=$w; fi
     local remain=$((w - f))
     echo -ne "[${G}${ALL_BLOCK:0:f}${GREY}${ALL_EMPTY:0:remain}${NC}]"
-}
-
-fmt_size() {
-    local v=$1
-    if [[ $v -ge 1073741824 ]]; then awk -v v=$v 'BEGIN{printf "%.1fG", v/1073741824}'
-    elif [[ $v -ge 1048576 ]]; then awk -v v=$v 'BEGIN{printf "%.1fM", v/1048576}'
-    elif [[ $v -ge 1024 ]]; then awk -v v=$v 'BEGIN{printf "%.1fK", v/1024}'
-    else echo "${v}B"; fi
 }
 
 fmt_bps() {
@@ -101,7 +94,6 @@ LOOP_IDX=0
 CACHED_IFACE=""
 
     # --- MAIN LOOP ---
-    echo ">> [DEBUG] zmturbo: Starting main loop, looking for job directories in ${DASHBOARD_DIR}" # Debugging line
     while true; do
         printf "\033[?25l\033[H" # Hide Cursor + Move to top
     MY_IP=$(hostname -I | awk '{print $1}')
@@ -147,8 +139,8 @@ CACHED_IFACE=""
             RX_SPD=$(( (RX_NOW - RX_PREV) / DELTA_T )); TX_SPD=$(( (TX_NOW - TX_PREV) / DELTA_T ))
             
             # Format Bytes/s and Bits/s
-            RX_FMT="$(fmt_size $RX_SPD)/s ($(fmt_bps $RX_SPD))"
-            TX_FMT="$(fmt_size $TX_SPD)/s ($(fmt_bps $TX_SPD))"
+            RX_FMT="$(human_size $RX_SPD)/s ($(fmt_bps $RX_SPD))"
+            TX_FMT="$(human_size $TX_SPD)/s ($(fmt_bps $TX_SPD))"
         else
             RX_FMT=".../s"
             TX_FMT=".../s"
@@ -236,7 +228,7 @@ CACHED_IFACE=""
                              if [ $delta_time -gt 0 ] && [ $delta_bytes -ge 0 ]; then
                                  spd=$(( delta_bytes / delta_time ))
                                  if [ $spd -gt 0 ]; then
-                                     SPEED_TXT="$(fmt_size $spd)/s"
+                                     SPEED_TXT="$(human_size $spd)/s"
                                      if [[ "$total_size" =~ ^[0-9]+$ ]] && [ "$total_size" -gt 0 ]; then
                                          rem_bytes=$(( total_size - curr ))
                                          eta_sec=$(( rem_bytes / spd ))

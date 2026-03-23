@@ -2,7 +2,64 @@
 
 # --- FUNGSI-FUNGSI MESIN TRANSFER ---
 
-# Mengurai output kemajuan dari rsync dan menulis ke file status
+# Mengurai output kemajuan dari rsync format JSON (lebih andal)
+parse_rsync_progress_json() {
+    local bytes_transferred=0
+    local total_bytes=0 
+    local current_speed="0B/s"
+    local progress_percent="0%"
+    local current_file="N/A" # TODO: Bisa diekstrak dari JSON jika diperlukan
+
+    if [[ -f "${JOB_DIR}/total_size" ]]; then 
+        total_bytes=$(cat "${JOB_DIR}/total_size")
+    fi
+
+    while IFS= read -r line; do
+        # Hanya proses baris yang relevan (LOG_PROGRESS)
+        if [[ "$line" != *"LOG_PROGRESS"* ]]; then continue; fi
+
+        # Ekstrak nilai dari JSON menggunakan awk yang sangat spesifik
+        local data=$(echo "$line" | awk -F', ' '{
+            for(i=1; i<=NF; i++) {
+                if($i ~ /"bytes":/) {
+                    split($i, b, ":"); 
+                    gsub(/"/, "", b[2]); 
+                    printf "bytes=%s ", b[2]
+                }
+                if($i ~ /"percent":/) {
+                    split($i, p, ":");
+                    gsub(/"/, "", p[2]);
+                    printf "percent=%s ", p[2]
+                }
+                if($i ~ /"speed":/) {
+                    split($i, s, ":");
+                    gsub(/"/, "", s[2]);
+                    printf "speed=%s ", s[2]
+                }
+            }
+            printf "\n"
+        }')
+        
+        # Evaluasi output awk untuk menetapkan variabel shell
+        eval "$data"
+
+        bytes_transferred=${bytes:-0}
+        progress_percent="${percent:-0}%"
+        # Format kecepatan menggunakan human_size
+        if [[ -n "$speed" ]] && [[ "$speed" -gt 0 ]]; then
+             current_speed="$(human_size "$speed")/s"
+        else
+             current_speed="0B/s"
+        fi
+        
+        echo "${bytes_transferred}|${total_bytes}|${progress_percent}|${current_speed}|${current_file}|IN_PROGRESS" > "${JOB_STATUS_FILE}"
+    done
+
+    echo "END|${total_bytes}|100%|N/A|N/A|COMPLETED" > "${JOB_STATUS_FILE}"
+}
+
+
+# Mengurai output kemajuan dari rsync dan menulis ke file status (fallback)
 parse_rsync_progress() {
     local bytes_transferred=0
     local total_bytes=0 
@@ -28,10 +85,10 @@ parse_rsync_progress() {
     echo "END|${total_bytes}|100%|N/A|N/A|COMPLETED" > "${JOB_STATUS_FILE}"
 }
 
-# Wrapper untuk menjalankan rsync dengan logika coba lagi
+# Wrapper untuk menjalankan perintah dengan logika coba lagi (tanpa eval)
 run_rsync_retry() {
-    local cmd="$1"
-    local desc="$2"
+    local desc="$1"; shift
+    local cmd_array=("$@")
     local max_retries=3
     local attempt=1
     
@@ -42,7 +99,13 @@ run_rsync_retry() {
         fi
         
         echo ">> Executing: $desc" | tee -a "$REPORT_TXT"
-        ( eval "$cmd" 2>&1; echo $? > "${JOB_DIR}/rsync_exit_status" ) | parse_rsync_progress & 
+
+        # Pilih parser berdasarkan dukungan fitur
+        if [[ "$ZTURBO_RSYNC_JSON_SUPPORT" == true ]]; then
+            ( "${cmd_array[@]}" 2>&1; echo $? > "${JOB_DIR}/rsync_exit_status" ) | parse_rsync_progress_json &
+        else
+            ( "${cmd_array[@]}" 2>&1; echo $? > "${JOB_DIR}/rsync_exit_status" ) | parse_rsync_progress &
+        fi
         local PARSER_PID=$!
         
         wait "${PARSER_PID}"
@@ -62,13 +125,27 @@ run_rsync_retry() {
 
 # Fungsi eksekusi utama
 main_execution() {
+    local rsync_base_opts;
+    local fpsync_base_opts;
+    local prefix_array=();
+
+    # Atur opsi dasar berdasarkan mode
     if [[ "$CURRENT_MODE" == "SAFE" ]]; then 
-        PREFIX="nice -n 10 ionice -c 2 -n 7"
-        RSYNC_OPTS="-av --no-p --no-t --omit-dir-times --timeout=600 --partial-dir=.zturbo_partial --info=progress2"
+        prefix_array=(nice -n 10 ionice -c 2 -n 7)
+        rsync_base_opts="-av --no-p --no-t --omit-dir-times --timeout=600 --partial-dir=.zturbo_partial"
     else 
-        PREFIX=""
-        RSYNC_OPTS="-aW --no-p --no-t --omit-dir-times --inplace --sparse --no-compress --timeout=600 --info=progress2"
-        FPSYNC_OPTS="-lptgoD --numeric-ids --sparse --no-compress -W --inplace --timeout=60 --info=progress2"
+        rsync_base_opts="-aW --no-p --no-t --omit-dir-times --inplace --sparse --no-compress --timeout=600"
+        fpsync_base_opts="-lptgoD --numeric-ids --sparse --no-compress -W --inplace --timeout=60"
+    fi
+
+    # Tambahkan opsi progress bar berdasarkan dukungan fitur
+    if [[ "$ZTURBO_RSYNC_JSON_SUPPORT" == true ]]; then
+        rsync_base_opts+=" --info=progress2,stats2 --json"
+        # fpsync tidak mendukung --json, jadi kita tetap pakai cara lama untuk itu
+        fpsync_base_opts+=" --info=progress2"
+    else
+        rsync_base_opts+=" --info=progress2"
+        fpsync_base_opts+=" --info=progress2"
     fi
 
     dynamic_governor &
@@ -78,16 +155,14 @@ main_execution() {
     if [[ ${#SELECTED_PATHS[@]} -gt 1 ]]; then
         if [[ "$CURRENT_MODE" == "SAFE" ]]; then
             echo ">> Multi-select detected (SAFE MODE - Sequential)."
-            SRCS=()
-            for s in "${SELECTED_PATHS[@]}"; do
-                SRCS+=("\"$s\"")
-            done
-            cmd="$PREFIX rsync $RSYNC_OPTS ${SRCS[*]} \"$DEST\""
-            run_rsync_retry "$cmd" "Batch Transfer"
+            local cmd_array=( "${prefix_array[@]}" rsync $rsync_base_opts )
+            cmd_array+=( "${SELECTED_PATHS[@]}" )
+            cmd_array+=( "$DEST" )
+            run_rsync_retry "Batch Transfer" "${cmd_array[@]}"
             EXIT_CODE=$?
         else
             echo ">> Multi-select detected (TURBO MODE - Hybrid)."
-            BG_PIDS=()
+            local BG_PIDS=()
             
             wait_bg_files() {
                 if [[ ${#BG_PIDS[@]} -gt 0 ]]; then
@@ -100,19 +175,19 @@ main_execution() {
             }
 
             for s in "${SELECTED_PATHS[@]}"; do
-                fname=$(basename "$s")
-                S_ARG="\"$s\""
+                local fname=$(basename "$s")
                 
                 if [[ -d "$s" ]]; then
                     wait_bg_files
-                    cmd="$PREFIX fpsync -n $THREADS -f $FILES_PER_JOB -v -o \"$FPSYNC_OPTS\" $S_ARG \"$DEST\""
-                    run_rsync_retry "$cmd" "$fname"
+                    # Catatan: fpsync tidak akan menggunakan parser JSON
+                    local cmd_array=( "${prefix_array[@]}" fpsync -n "$THREADS" -f "$FILES_PER_JOB" -v -o "$fpsync_base_opts" "$s" "$DEST" )
+                    run_rsync_retry "$fname" "${cmd_array[@]}"
                     [ $? -ne 0 ] && EXIT_CODE=1
                 else
                     echo ">> [File] Background Start: $fname" | tee -a "$REPORT_TXT"
                     (
-                        cmd="$PREFIX rsync $RSYNC_OPTS $S_ARG \"$DEST\""
-                        run_rsync_retry "$cmd" "$fname"
+                        local cmd_array=( "${prefix_array[@]}" rsync $rsync_base_opts "$s" "$DEST" )
+                        run_rsync_retry "$fname" "${cmd_array[@]}"
                     ) &
                     BG_PIDS+=($!)
                 fi
@@ -120,23 +195,22 @@ main_execution() {
             wait_bg_files
         fi
     else
-        s="${SELECTED_PATHS[0]}"
-        fname=$(basename "$s")
-        S_ARG="\"$s\""
+        local s="${SELECTED_PATHS[0]}"
+        local fname=$(basename "$s")
+        local cmd_array=()
         
         if [[ "$CURRENT_MODE" == "SAFE" ]]; then
-            cmd="$PREFIX rsync $RSYNC_OPTS $S_ARG \"$DEST\""
-            run_rsync_retry "$cmd" "$fname"
-            EXIT_CODE=$?
+            cmd_array=( "${prefix_array[@]}" rsync $rsync_base_opts "$s" "$DEST" )
         else
             if [[ -d "$s" ]]; then
-                cmd="$PREFIX fpsync -n $THREADS -f $FILES_PER_JOB -v -o \"$FPSYNC_OPTS\" $S_ARG \"$DEST\""
+                # Catatan: fpsync tidak akan menggunakan parser JSON
+                cmd_array=( "${prefix_array[@]}" fpsync -n "$THREADS" -f "$FILES_PER_JOB" -v -o "$fpsync_base_opts" "$s" "$DEST" )
             else
-                cmd="$PREFIX rsync $RSYNC_OPTS $S_ARG \"$DEST\""
+                cmd_array=( "${prefix_array[@]}" rsync $rsync_base_opts "$s" "$DEST" )
             fi
-            run_rsync_retry "$cmd" "$fname"
-            EXIT_CODE=$?
         fi
+        run_rsync_retry "$fname" "${cmd_array[@]}"
+        EXIT_CODE=$?
     fi
 
     JOB_COMPLETED=true
@@ -155,27 +229,52 @@ post_execution_verification() {
             # Optimize find to output just a dot per file and count bytes, avoids long strings
             T_FILES=$(find "${SELECTED_PATHS[@]}" -type f -printf '.' 2>/dev/null | wc -c)
         fi
-        echo "$T_BYTES $T_FILES" > /tmp/dt_src_$$
+        echo "$T_BYTES $T_FILES" > "/tmp/zturbo_src_$$"
     }
 
+    # Optimasi: Hanya periksa item yang relevan di tujuan
     calc_dest() {
-        local target="$1"
-        if [[ ! -e "$target" ]]; then echo "0 0" > /tmp/dt_dest_$$; return; fi
-        local b=$(du -sb "$target" 2>/dev/null | cut -f1)
-        [ -z "$b" ] && b=0
-        local f=1
-        if [[ -d "$target" ]]; then f=$(find "$target" -type f -printf '.' 2>/dev/null | wc -c); fi
-        echo "$b $f" > /tmp/dt_dest_$$
+        local dest_root="$1"; shift
+        local source_paths=("$@")
+        local dest_items=()
+        local T_BYTES=0
+        local T_FILES=0
+
+        # Jika tidak ada path sumber, tidak ada yang perlu dilakukan
+        if [[ ${#source_paths[@]} -eq 0 ]]; then
+            echo "0 0" > "/tmp/zturbo_dest_$$"; return
+        fi
+        
+        # Bangun path tujuan dari basename sumber
+        for src_path in "${source_paths[@]}"; do
+            dest_items+=("$dest_root/$(basename "$src_path")")
+        done
+
+        # Periksa apakah path tujuan ada sebelum mencoba menghitung
+        local existing_dest_items=()
+        for item in "${dest_items[@]}"; do
+            if [[ -e "$item" ]]; then
+                existing_dest_items+=("\"$item\"")
+            fi
+        done
+        
+        if [[ ${#existing_dest_items[@]} -gt 0 ]]; then
+            T_BYTES=$(du -scb ${existing_dest_items[*]} 2>/dev/null | tail -n 1 | cut -f1)
+            [ -z "$T_BYTES" ] && T_BYTES=0
+            T_FILES=$(find ${existing_dest_items[*]} -type f -printf '.' 2>/dev/null | wc -c)
+        fi
+        echo "$T_BYTES $T_FILES" > "/tmp/zturbo_dest_$$"
     }
 
     calc_source & local PID_SRC=$!
-    calc_dest "$DEST" & local PID_DEST=$!
+    # Panggil calc_dest dengan path tujuan dan array path sumber
+    calc_dest "$DEST" "${SELECTED_PATHS[@]}" & local PID_DEST=$!
     wait $PID_SRC
     wait $PID_DEST
 
-    read SRC_BYTES SRC_FILES < /tmp/dt_src_$$
-    read DEST_BYTES DEST_FILES < /tmp/dt_dest_$$
-    rm -f /tmp/dt_src_$$ /tmp/dt_dest_$$
+    read SRC_BYTES SRC_FILES < "/tmp/zturbo_src_$$"
+    read DEST_BYTES DEST_FILES < "/tmp/zturbo_dest_$$"
+    rm -f "/tmp/zturbo_src_$$" "/tmp/zturbo_dest_$$"
 
     local SIZE_STATUS="MISMATCH ❌"
     local FILE_STATUS="MISMATCH ❌"

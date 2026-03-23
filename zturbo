@@ -29,6 +29,8 @@ chmod 700 "$REPORT_DIR" 2>/dev/null
 if [[ -n "$SUDO_USER" ]]; then REAL_USER="$SUDO_USER"; else REAL_USER="$USER"; fi
 export JOB_ID="${REAL_USER}_$$"
 export JOB_DIR="${DASHBOARD_DIR}/${JOB_ID}"
+export BROWSER_DIR="/dev/shm/zturbo_browser_$$"
+export CURRENT_SIZE_CALC_PID=""
 export JOB_INFO_FILE="${JOB_DIR}/info"
 export JOB_STATUS_FILE="${JOB_DIR}/status"
 export JOB_PID_FILE="${JOB_DIR}/pid"
