@@ -92,6 +92,7 @@ declare -A PREV_IF_TX
 declare PREV_CPU_TOTAL
 declare PREV_CPU_IOWAIT
 RX_PREV=0; TX_PREV=0; TIME_PREV=0
+PREV_SEC=$(date +%s) # Initialize PREV_SEC
 LOOP_IDX=0
 CACHED_IFACE=""
 declare -A IFACE_IP_CACHE
@@ -379,15 +380,20 @@ declare -A IFACE_IP_CACHE
         PREV_IF_RX["$iface"]=$rx
         PREV_IF_TX["$iface"]=$tx
         
-        status="${GREY}Idle${NC}"
-        if [[ -n "${GLOBALLY_USED_IFACES[$iface]}" ]]; then status="${G}ACTIVE${NC}"; fi
+        status_text="${GREY}Idle${NC}"
+        if [[ $rx_spd -gt 10240 || $tx_spd -gt 10240 ]]; then # Has significant traffic (approx > 10KB/s)
+            status_text="${Y}Traffic${NC}"
+        fi
+        if [[ -n "${GLOBALLY_USED_IFACES[$iface]}" ]]; then # Used by zturbo job
+            status_text="${G}ZTURBO Active${NC}"
+        fi
         
         ip_addr=${IFACE_IP_CACHE["$iface"]:-"-"}
         
-        # Color interfaces with traffic
-        if [[ $rx_spd -gt 10240 || $tx_spd -gt 10240 ]]; then col=$W; else col=$NC; fi
+        # Color interfaces with traffic (bold white for high traffic)
+        if [[ $rx_spd -gt 102400 || $tx_spd -gt 102400 ]]; then col=$W; else col=$NC; fi # 100KB/s threshold for bold white
         
-        printf " ${col}%-12s${NC} %-16s %-16s %-16s %b${NC}${K}\n" "$iface" "$ip_addr" "$(human_size $rx_spd)/s" "$(human_size $tx_spd)/s" "$status"
+        printf " ${col}%-12s${NC} %-16s %-16s %-16s %b${NC}${K}\n" "$iface" "$ip_addr" "$(human_size $rx_spd)/s" "$(human_size $tx_spd)/s" "$status_text"
     done < /proc/net/dev
     PREV_SEC=$NOW_SEC
 
