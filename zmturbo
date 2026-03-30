@@ -153,7 +153,7 @@ CACHED_IFACE=""
     MAX_THREADS_SAFE=$(( MEM_SAFE / 60 )); [ $MAX_THREADS_SAFE -lt 2 ] && MAX_THREADS_SAFE=2
 
     echo -e "${C}=== ZMTURBO V1.3.5 (MODULAR) ===${NC}${K}"
-    echo -e "HOST : ${W}$(hostname)${NC} | IP: ${Y}$MY_IP${NC} ($IFACE) | USER: ${Y}$REAL_USER${NC}${K}"
+    echo -e "HOST : ${W}$(hostname)${NC} | DEFAULT IP: ${Y}$MY_IP${NC} ($IFACE) | USER: ${Y}$REAL_USER${NC}${K}"
     echo -e "STATS: CPU: ${W}$LOAD${NC} | RAM: ${MEM_COL}${MEM_PERC}%${NC} | IO: ${IO_COL}${IOWAIT}%${NC} | NET: ${G}⬇$RX_FMT ⬆$TX_FMT${NC}${K}"
     echo -e "LIMIT: Max Threads: ${G}$MAX_THREADS_SAFE${NC} | OS Guard: ${Y}${MEM_GUARD}MB${NC}${K}"
 
@@ -298,8 +298,41 @@ CACHED_IFACE=""
     echo -e "${K}\n${Y}[ 📂 ACTIVE ROUTES (SRC ➔ DST) ]${NC}${K}"
     if [ ${#active_transfers[@]} -gt 0 ]; then
         for item in "${active_transfers[@]}"; do
-            IFS='|' read -r pid owner _ _ _ _ _ _ src dest <<< "$item"
+            IFS='|' read -r pid owner cpu_usage proc_count SPEED_TXT ETA_TXT perc PERC_TXT src dest <<< "$item"
             echo -e "${GREY}   ● ${pid}: ${src}  ➔   ${dest}${NC}${K}"
+            
+            # --- Network Path Trace ---
+            # 1. Try to find actual TCP socket for the process group
+            children_list=$(pgrep -P "$pid" 2>/dev/null)
+            p_list="$pid ${children_list:-}"
+            p_regex=$(echo "$p_list" | sed 's/ /|/g')
+            
+            # Extract Remote IP from ss if available
+            REMOTE_IP=$(ss -ntp 2>/dev/null | grep -E ",pid=($p_regex)," | awk '{print $5}' | cut -d':' -f1 | head -n1)
+            
+            # 2. If no direct TCP (e.g. NFS/SMB Mount), trace from the destination path
+            if [ -z "$REMOTE_IP" ] && [[ "$dest" == /* ]]; then
+                MNT_SERVER=$(df "$dest" 2>/dev/null | tail -1 | awk '{print $1}')
+                if [[ "$MNT_SERVER" == *":"* ]]; then REMOTE_IP=$(echo "$MNT_SERVER" | cut -d':' -f1); fi
+                if [[ "$MNT_SERVER" == "//"* ]]; then REMOTE_IP=$(echo "$MNT_SERVER" | cut -d'/' -f3); fi
+                REMOTE_IP=$(echo "$REMOTE_IP" | tr -d '[]')
+            fi
+
+            NET_PATH=""
+            if [ -n "$REMOTE_IP" ]; then
+                # Get Source IP and Interface (VLAN) from ip route
+                ROUTE_INFO=$(ip -o route get "$REMOTE_IP" 2>/dev/null)
+                SRC_IP=$(echo "$ROUTE_INFO" | grep -oP 'src \K\S+')
+                IFACE_USED=$(echo "$ROUTE_INFO" | grep -oP 'dev \K\S+')
+                
+                if [ -n "$SRC_IP" ] && [ -n "$IFACE_USED" ]; then
+                    NET_PATH="${SRC_IP} (${IFACE_USED}) ➔ ${REMOTE_IP}"
+                fi
+            fi
+            
+            if [ -n "$NET_PATH" ]; then
+                echo -e "     ${GREY}└── Segment Path: ${BOLD_WHITE}${NET_PATH}${NC}${K}"
+            fi
         done
     else
         echo -e "   ${GREY}   (No routes to display)${NC}${K}"
