@@ -258,14 +258,14 @@ post_execution_verification() {
         local existing_dest_items=()
         for item in "${dest_target_paths[@]}"; do
             if [[ -e "$item" ]]; then
-                existing_dest_items+=("\"$item\"")
+                existing_dest_items+=("$item")
             fi
         done
         
         if [[ ${#existing_dest_items[@]} -gt 0 ]]; then
-            T_BYTES=$(du -scb ${existing_dest_items[*]} 2>/dev/null | tail -n 1 | cut -f1)
+            T_BYTES=$(du -scb "${existing_dest_items[@]}" 2>/dev/null | tail -n 1 | cut -f1)
             [ -z "$T_BYTES" ] && T_BYTES=0
-            T_FILES=$(find ${existing_dest_items[*]} -type f -printf '.' 2>/dev/null | wc -c)
+            T_FILES=$(find "${existing_dest_items[@]}" -type f -printf '.' 2>/dev/null | wc -c)
         fi
         echo "$T_BYTES $T_FILES" > "/tmp/zturbo_dest_$$"
     }
