@@ -358,7 +358,7 @@ declare -A IFACE_IP_CACHE
 
     # [C] NETWORK INTERFACES MONITOR
     echo -e "${K}\n${Y}[ 🌐 NETWORK INTERFACE STATUS ]${NC}${K}"
-    printf " %-12s %-16s %-16s %-16s %s${K}\n" "INTERFACE" "IP ADDRESS" "RX SPEED" "TX SPEED" "STATUS"
+    printf " %-12s %-16s %-16s %-16s${K}\n" "INTERFACE" "IP ADDRESS" "RX SPEED" "TX SPEED"
     echo -e "───────────────────────────────────────────────────────────────────────────────────────────────${K}"
     
     # Calculate per-interface speeds
@@ -380,20 +380,12 @@ declare -A IFACE_IP_CACHE
         PREV_IF_RX["$iface"]=$rx
         PREV_IF_TX["$iface"]=$tx
         
-        status_text="${GREY}Idle${NC}"
-        if [[ $rx_spd -gt 10240 || $tx_spd -gt 10240 ]]; then # Has significant traffic (approx > 10KB/s)
-            status_text="${Y}Traffic${NC}"
-        fi
-        if [[ -n "${GLOBALLY_USED_IFACES[$iface]}" ]]; then # Used by zturbo job
-            status_text="${G}ZTURBO Active${NC}"
-        fi
-        
         ip_addr=${IFACE_IP_CACHE["$iface"]:-"-"}
         
         # Color interfaces with traffic (bold white for high traffic)
         if [[ $rx_spd -gt 102400 || $tx_spd -gt 102400 ]]; then col=$W; else col=$NC; fi # 100KB/s threshold for bold white
         
-        printf " ${col}%-12s${NC} %-16s %-16s %-16s %b${NC}${K}\n" "$iface" "$ip_addr" "$(human_size $rx_spd)/s" "$(human_size $tx_spd)/s" "$status_text"
+        printf " ${col}%-12s${NC} %-16s %-16s %-16s${NC}${K}\n" "$iface" "$ip_addr" "$(human_size $rx_spd)/s" "$(human_size $tx_spd)/s"
     done < /proc/net/dev
     PREV_SEC=$NOW_SEC
 
