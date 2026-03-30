@@ -236,7 +236,7 @@ post_execution_verification() {
     calc_dest() {
         local dest_root="$1"; shift
         local source_paths=("$@")
-        local dest_items=()
+        local dest_target_paths=()
         local T_BYTES=0
         local T_FILES=0
 
@@ -244,15 +244,19 @@ post_execution_verification() {
         if [[ ${#source_paths[@]} -eq 0 ]]; then
             echo "0 0" > "/tmp/zturbo_dest_$$"; return
         fi
-        
-        # Bangun path tujuan dari basename sumber
-        for src_path in "${source_paths[@]}"; do
-            dest_items+=("$dest_root/$(basename "$src_path")")
-        done
+
+        # Tentukan path tujuan berdasarkan apakah itu direktori atau file
+        if [[ -d "$dest_root" ]]; then # Destination is a directory
+            for src_path in "${source_paths[@]}"; do
+                dest_target_paths+=("$dest_root/$(basename "$src_path")")
+            done
+        else # Destination is a single file
+            dest_target_paths+=("$dest_root")
+        fi
 
         # Periksa apakah path tujuan ada sebelum mencoba menghitung
         local existing_dest_items=()
-        for item in "${dest_items[@]}"; do
+        for item in "${dest_target_paths[@]}"; do
             if [[ -e "$item" ]]; then
                 existing_dest_items+=("\"$item\"")
             fi
